@@ -20,13 +20,11 @@
 //!
 //! Tracking links for unstable features used here (which require nightly builds):
 //!
-//! - simd_ffi: https://github.com/rust-lang/rust/issues/27731
-//! - link_llvm_intrinsics: https://github.com/rust-lang/rust/issues/29602
-//! - avx512_target_feature: https://github.com/rust-lang/rust/issues/111137
+//! - avx512: https://github.com/rust-lang/rust/issues/111137
 
 #![cfg_attr(
     feature = "vpclmulqdq",
-    feature(simd_ffi, link_llvm_intrinsics, avx512_target_feature,)
+    feature(avx512_target_feature,stdarch_x86_avx512)
 )]
 
 mod pclmulqdq;
