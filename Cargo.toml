@@ -28,6 +28,7 @@ rand = "0.8"
 pmull = [] # deprecated, no longer have any effect.
 vpclmulqdq = ["lazy_static"]
 fake-simd = []
+c-bindings = []
 
 [[bench]]
 name = 'benchmark'
