@@ -28,7 +28,7 @@ rand = "0.8"
 pmull = [] # deprecated, no longer have any effect.
 vpclmulqdq = ["lazy_static"]
 fake-simd = []
-c-bindings = []
+c-bindings = ["dep:cbindgen"]
 
 [[bench]]
 name = 'benchmark'
@@ -38,7 +38,7 @@ harness = false
 strip = true
 
 [build-dependencies]
-cbindgen = "0.27.0"
+cbindgen = {version = "0.27.0", optional = true}
 
 [lib]
 name = "crc64fast_nvme"
