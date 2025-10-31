@@ -19,7 +19,7 @@
 //! let checksum = c.sum64();
 //! assert_eq!(checksum, 0xd9160d1fa8e418e3);
 //! ```
-//! ### C-compatible shared library example (PHP)
+//! ### C-compatible shared library example (PHP; requires enabling the `capi` feature)
 //!
 //! ```php
 //! $digest = $ffi->digest_new();
@@ -40,9 +40,6 @@
     feature(avx512_target_feature, stdarch_x86_avx512)
 )]
 
-use std::os::raw::c_char;
-use std::slice;
-
 mod pclmulqdq;
 mod table;
 
@@ -55,65 +52,75 @@ pub struct Digest {
     state: u64,
 }
 
-// begin C-compatible shared library methods
+#[cfg(feature = "capi")]
+mod ffi {
+    use super::Digest;
+    use std::os::raw::c_char;
+    use std::slice;
 
-/// Opaque type for C for use in FFI (C-compatible shared library)
-#[repr(C)]
-pub struct DigestHandle(*mut Digest);
+    /// Opaque type for C for use in FFI (C-compatible shared library)
+    #[repr(C)]
+    pub struct DigestHandle(*mut Digest);
 
-/// Creates a new Digest (C-compatible shared library)
-#[no_mangle]
-pub extern "C" fn digest_new() -> *mut DigestHandle {
-    let digest = Box::new(Digest::new());
-    let handle = Box::new(DigestHandle(Box::into_raw(digest)));
-    Box::into_raw(handle)
-}
-
-/// Writes data to the Digest (C-compatible shared library)
-///
-/// # Safety
-///
-/// Uses unsafe method calls
-#[no_mangle]
-pub unsafe extern "C" fn digest_write(handle: *mut DigestHandle, data: *const c_char, len: usize) {
-    if handle.is_null() || data.is_null() {
-        return;
+    /// Creates a new Digest (C-compatible shared library)
+    #[no_mangle]
+    pub extern "C" fn digest_new() -> *mut DigestHandle {
+        let digest = Box::new(Digest::new());
+        let handle = Box::new(DigestHandle(Box::into_raw(digest)));
+        Box::into_raw(handle)
     }
 
-    let digest = &mut *(*handle).0;
-    let bytes = slice::from_raw_parts(data as *const u8, len);
-    digest.write(bytes);
-}
+    /// Writes data to the Digest (C-compatible shared library)
+    ///
+    /// # Safety
+    ///
+    /// Uses unsafe method calls
+    #[no_mangle]
+    pub unsafe extern "C" fn digest_write(
+        handle: *mut DigestHandle,
+        data: *const c_char,
+        len: usize,
+    ) {
+        if handle.is_null() || data.is_null() {
+            return;
+        }
 
-/// Calculates the CRC-64 checksum from the Digest (C-compatible shared library)
-///
-/// # Safety
-///
-/// Uses unsafe method calls
-#[no_mangle]
-pub unsafe extern "C" fn digest_sum64(handle: *const DigestHandle) -> u64 {
-    if handle.is_null() {
-        return 0;
+        let digest = &mut *(*handle).0;
+        let bytes = slice::from_raw_parts(data as *const u8, len);
+        digest.write(bytes);
     }
 
-    let digest = &*(*handle).0;
-    digest.sum64()
-}
+    /// Calculates the CRC-64 checksum from the Digest (C-compatible shared library)
+    ///
+    /// # Safety
+    ///
+    /// Uses unsafe method calls
+    #[no_mangle]
+    pub unsafe extern "C" fn digest_sum64(handle: *const DigestHandle) -> u64 {
+        if handle.is_null() {
+            return 0;
+        }
 
-/// Frees the Digest (C-compatible shared library)
-///
-/// # Safety
-///
-/// Uses unsafe method calls
-#[no_mangle]
-pub unsafe extern "C" fn digest_free(handle: *mut DigestHandle) {
-    if !handle.is_null() {
-        let handle = Box::from_raw(handle);
-        let _ = Box::from_raw(handle.0);
+        let digest = &*(*handle).0;
+        digest.sum64()
+    }
+
+    /// Frees the Digest (C-compatible shared library)
+    ///
+    /// # Safety
+    ///
+    /// Uses unsafe method calls
+    #[no_mangle]
+    pub unsafe extern "C" fn digest_free(handle: *mut DigestHandle) {
+        if !handle.is_null() {
+            let handle = Box::from_raw(handle);
+            let _ = Box::from_raw(handle.0);
+        }
     }
 }
 
-// end C-compatible shared library methods
+#[cfg(feature = "capi")]
+pub use ffi::{digest_free, digest_new, digest_sum64, digest_write, DigestHandle};
 
 impl Digest {
     /// Creates a new `Digest`.
@@ -169,9 +176,6 @@ mod tests {
     use super::*;
     use proptest::collection::size_range;
     use proptest::prelude::*;
-    use std::fs::{read, write};
-    use std::ptr;
-    extern crate cbindgen;
 
     // CRC-64/NVME
     //
@@ -290,151 +294,161 @@ mod tests {
     }
 
     // test the FFI Digest functions
-    #[test]
-    fn test_ffi_digest_lifecycle() {
-        unsafe {
-            // Create new digest
-            let handle = digest_new();
-            assert!(!handle.is_null(), "Digest creation failed");
+    #[cfg(feature = "capi")]
+    mod capi {
+        use crate::{digest_free, digest_new, digest_sum64, digest_write};
+        use std::fs::{read, write};
+        use std::os::raw::c_char;
+        use std::ptr;
 
-            // Write some data
-            let data = b"hello world!";
-            digest_write(handle, data.as_ptr() as *const c_char, data.len());
-
-            // Get sum and verify against known value
-            let sum = digest_sum64(handle);
-            assert_eq!(sum, 0xd9160d1fa8e418e3, "CRC64 calculation incorrect");
-
-            // Clean up
-            digest_free(handle);
-        }
-    }
-
-    #[test]
-    fn test_ffi_null_handling() {
-        unsafe {
-            // Test null handle with write
-            digest_write(ptr::null_mut(), b"test".as_ptr() as *const c_char, 4);
-
-            // Test null data with valid handle
-            let handle = digest_new();
-            digest_write(handle, ptr::null(), 0);
-
-            // Test null handle with sum64
-            let sum = digest_sum64(ptr::null());
-            assert_eq!(sum, 0, "Null handle should return 0");
-
-            // Clean up
-            digest_free(handle);
-        }
-    }
-
-    #[test]
-    fn test_ffi_empty_data() {
-        unsafe {
-            let handle = digest_new();
-
-            // Write empty data
-            digest_write(handle, b"".as_ptr() as *const c_char, 0);
-            let sum = digest_sum64(handle);
-            assert_eq!(sum, 0, "Empty data should produce 0");
-
-            digest_free(handle);
-        }
-    }
-
-    #[test]
-    fn test_ffi_binary_data() {
-        unsafe {
-            let handle = digest_new();
-
-            // Test with binary data including null bytes
-            let data = [0u8, 1, 2, 3, 0, 4, 5, 0, 6];
-            digest_write(handle, data.as_ptr() as *const c_char, data.len());
-
-            // Write additional data to test streaming
-            let more_data = [7u8, 8, 9];
-            digest_write(handle, more_data.as_ptr() as *const c_char, more_data.len());
-
-            let sum = digest_sum64(handle);
-            assert_ne!(sum, 0, "Binary data should produce non-zero CRC");
-
-            digest_free(handle);
-        }
-    }
-
-    #[test]
-    fn test_ffi_large_vectors() {
-        unsafe {
-            let zeros = vec![0u8; 4096];
-            let ones = vec![255u8; 4096];
-
-            let handle = digest_new();
-            digest_write(handle, zeros.as_ptr() as *const c_char, zeros.len());
-            let sum = digest_sum64(handle);
-            assert_eq!(sum, 0x6482d367eb22b64e, "Failed on 4096 zeros");
-            digest_free(handle);
-
-            let handle = digest_new();
-            digest_write(handle, ones.as_ptr() as *const c_char, ones.len());
-            let sum = digest_sum64(handle);
-            assert_eq!(sum, 0xc0ddba7302eca3ac, "Failed on 4096 ones");
-            digest_free(handle);
-        }
-    }
-
-    #[test]
-    fn test_ffi_standard_strings() {
-        unsafe {
-            let test_cases: Vec<(&[u8], u64)> = vec![(b"123456789", 0xae8b14860a799888), (b"", 0)];
-
-            for (input, expected) in test_cases {
+        #[test]
+        fn test_ffi_digest_lifecycle() {
+            unsafe {
+                // Create new digest
                 let handle = digest_new();
-                digest_write(handle, input.as_ptr() as *const c_char, input.len());
+                assert!(!handle.is_null(), "Digest creation failed");
+
+                // Write some data
+                let data = b"hello world!";
+                digest_write(handle, data.as_ptr() as *const c_char, data.len());
+
+                // Get sum and verify against known value
                 let sum = digest_sum64(handle);
-                assert_eq!(sum, expected, "Failed on test vector: {:?}", input);
+                assert_eq!(sum, 0xd9160d1fa8e418e3, "CRC64 calculation incorrect");
+
+                // Clean up
                 digest_free(handle);
             }
         }
-    }
 
-    #[test]
-    fn test_ffi_incremental_update() {
-        unsafe {
-            let handle = digest_new();
+        #[test]
+        fn test_ffi_null_handling() {
+            unsafe {
+                // Test null handle with write
+                digest_write(ptr::null_mut(), b"test".as_ptr() as *const c_char, 4);
 
-            // Write data incrementally
-            let data = "hello world!";
-            for byte in data.bytes() {
-                digest_write(handle, &byte as *const u8 as *const c_char, 1);
+                // Test null data with valid handle
+                let handle = digest_new();
+                digest_write(handle, ptr::null(), 0);
+
+                // Test null handle with sum64
+                let sum = digest_sum64(ptr::null());
+                assert_eq!(sum, 0, "Null handle should return 0");
+
+                // Clean up
+                digest_free(handle);
+            }
+        }
+
+        #[test]
+        fn test_ffi_empty_data() {
+            unsafe {
+                let handle = digest_new();
+
+                // Write empty data
+                digest_write(handle, b"".as_ptr() as *const c_char, 0);
+                let sum = digest_sum64(handle);
+                assert_eq!(sum, 0, "Empty data should produce 0");
+
+                digest_free(handle);
+            }
+        }
+
+        #[test]
+        fn test_ffi_binary_data() {
+            unsafe {
+                let handle = digest_new();
+
+                // Test with binary data including null bytes
+                let data = [0u8, 1, 2, 3, 0, 4, 5, 0, 6];
+                digest_write(handle, data.as_ptr() as *const c_char, data.len());
+
+                // Write additional data to test streaming
+                let more_data = [7u8, 8, 9];
+                digest_write(handle, more_data.as_ptr() as *const c_char, more_data.len());
+
+                let sum = digest_sum64(handle);
+                assert_ne!(sum, 0, "Binary data should produce non-zero CRC");
+
+                digest_free(handle);
+            }
+        }
+
+        #[test]
+        fn test_ffi_large_vectors() {
+            unsafe {
+                let zeros = vec![0u8; 4096];
+                let ones = vec![255u8; 4096];
+
+                let handle = digest_new();
+                digest_write(handle, zeros.as_ptr() as *const c_char, zeros.len());
+                let sum = digest_sum64(handle);
+                assert_eq!(sum, 0x6482d367eb22b64e, "Failed on 4096 zeros");
+                digest_free(handle);
+
+                let handle = digest_new();
+                digest_write(handle, ones.as_ptr() as *const c_char, ones.len());
+                let sum = digest_sum64(handle);
+                assert_eq!(sum, 0xc0ddba7302eca3ac, "Failed on 4096 ones");
+                digest_free(handle);
+            }
+        }
+
+        #[test]
+        fn test_ffi_standard_strings() {
+            unsafe {
+                let test_cases: Vec<(&[u8], u64)> =
+                    vec![(b"123456789", 0xae8b14860a799888), (b"", 0)];
+
+                for (input, expected) in test_cases {
+                    let handle = digest_new();
+                    digest_write(handle, input.as_ptr() as *const c_char, input.len());
+                    let sum = digest_sum64(handle);
+                    assert_eq!(sum, expected, "Failed on test vector: {:?}", input);
+                    digest_free(handle);
+                }
+            }
+        }
+
+        #[test]
+        fn test_ffi_incremental_update() {
+            unsafe {
+                let handle = digest_new();
+
+                // Write data incrementally
+                let data = "hello world!";
+                for byte in data.bytes() {
+                    digest_write(handle, &byte as *const u8 as *const c_char, 1);
+                }
+
+                let sum = digest_sum64(handle);
+                assert_eq!(sum, 0xd9160d1fa8e418e3, "Incremental update failed");
+
+                digest_free(handle);
+            }
+        }
+
+        #[test]
+        fn test_crc64fast_nvme_bindings() -> Result<(), String> {
+            const BINDING: &str = "crc64fast_nvme.h";
+            let crate_dir =
+                std::env::var("CARGO_MANIFEST_DIR").map_err(|error| error.to_string())?;
+
+            let mut expected = Vec::new();
+            cbindgen::generate(crate_dir)
+                .map_err(|error| error.to_string())?
+                .write(&mut expected);
+
+            let actual = read(BINDING).map_err(|error| error.to_string())?;
+
+            if expected != actual {
+                write(BINDING, expected).map_err(|error| error.to_string())?;
+                return Err(format!(
+                    "{BINDING} is not up-to-date, commit the generated file and try again"
+                ));
             }
 
-            let sum = digest_sum64(handle);
-            assert_eq!(sum, 0xd9160d1fa8e418e3, "Incremental update failed");
-
-            digest_free(handle);
+            Ok(())
         }
-    }
-
-    #[test]
-    fn test_crc64fast_nvme_bindings() -> Result<(), String> {
-        const BINDING: &str = "crc64fast_nvme.h";
-        let crate_dir = std::env::var("CARGO_MANIFEST_DIR").map_err(|error| error.to_string())?;
-
-        let mut expected = Vec::new();
-        cbindgen::generate(crate_dir)
-            .map_err(|error| error.to_string())?
-            .write(&mut expected);
-
-        let actual = read(BINDING).map_err(|error| error.to_string())?;
-
-        if expected != actual {
-            write(BINDING, expected).map_err(|error| error.to_string())?;
-            return Err(format!(
-                "{BINDING} is not up-to-date, commit the generated file and try again"
-            ));
-        }
-
-        Ok(())
     }
 }

@@ -17,9 +17,9 @@ rust-version = "1.70.0"
 [dependencies]
 crc = "3"
 lazy_static = { version = "1.4.0", optional = true }
+cbindgen = { version = "0.27.0", optional = true }
 
 [dev-dependencies]
-cbindgen = "0.27.0"
 crc = "3"
 proptest = "1"
 criterion = "0.5"
@@ -29,6 +29,7 @@ rand = "0.8"
 pmull = [] # deprecated, no longer have any effect.
 vpclmulqdq = ["lazy_static"]
 fake-simd = []
+capi = ["dep:cbindgen"]
 
 [[bench]]
 name = 'benchmark'
