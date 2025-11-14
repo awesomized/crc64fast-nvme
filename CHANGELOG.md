@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## [1.2.1](https://github.com/awesomized/crc64fast-nvme/compare/1.2.0...1.2.1) - 2025-11-14
+- DEPRECATED. This project has been deprecated. Use [crc-fast-rust](https://github.com/awesomized/crc-fast-rust) instead.
+
 ## [1.2.0](https://github.com/awesomized/crc64fast-nvme/compare/1.1.1...1.2.0) - 2025-02-18
 - [Use link time optimization (LTO) for a +4-13% performance boost](https://github.com/awesomized/crc64fast-nvme/commit/7627c054512e921c6ffcf1fc024f5931567a3123)
 - [Remove the build script and add a test that verifies bindings are up-to-date](https://github.com/awesomized/crc64fast-nvme/pull/9)
